@@ -1,0 +1,21 @@
+/* consoleapi.h minimal pour tcc : pseudo-consoles (ConPTY, Windows 10 1809+)
+ * et liste d'attributs de processus, pour les fenêtres de commande d'acme. */
+#ifndef GLADS_CONSOLEAPI_H
+#define GLADS_CONSOLEAPI_H
+typedef void *HPCON;
+typedef struct _PROC_THREAD_ATTRIBUTE_LIST *PPROC_THREAD_ATTRIBUTE_LIST, *LPPROC_THREAD_ATTRIBUTE_LIST;
+typedef struct _STARTUPINFOEXA {
+	STARTUPINFOA StartupInfo;
+	LPPROC_THREAD_ATTRIBUTE_LIST lpAttributeList;
+} STARTUPINFOEXA, *LPSTARTUPINFOEXA;
+#ifndef EXTENDED_STARTUPINFO_PRESENT
+#define EXTENDED_STARTUPINFO_PRESENT 0x00080000
+#endif
+#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
+WINAPI HRESULT CreatePseudoConsole(COORD, HANDLE, HANDLE, DWORD, HPCON *);
+WINAPI HRESULT ResizePseudoConsole(HPCON, COORD);
+WINAPI void ClosePseudoConsole(HPCON);
+WINAPI BOOL InitializeProcThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST, DWORD, DWORD, PSIZE_T);
+WINAPI BOOL UpdateProcThreadAttribute(LPPROC_THREAD_ATTRIBUTE_LIST, DWORD, DWORD_PTR, PVOID, SIZE_T, PVOID, PSIZE_T);
+WINAPI void DeleteProcThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST);
+#endif

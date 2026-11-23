@@ -1,0 +1,17 @@
+--- a/include/libc.h
++++ b/include/libc.h
+@@ -929,11 +929,9 @@
+ /* compiler directives on plan 9 */
+ #define	SET(x)	((x)=0)
+ #define	USED(x)	if(x){}else{}
+-#ifdef __GNUC__
+-#	if __GNUC__ >= 3
+-#		undef USED
+-#		define USED(x) ((void)(x))
+-#	endif
++#if (defined(__GNUC__) && __GNUC__ >= 3) || defined(__TINYC__)
++#	undef USED
++#	define USED(x) ((void)(x))
+ #endif
+ 
+ /* command line */

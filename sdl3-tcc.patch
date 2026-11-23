@@ -1,0 +1,114 @@
+diff -ru a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -2178,14 +2178,13 @@
+     set (USE_POSIX_SPAWN 1)
+   endif()
+ elseif(WINDOWS)
+-  enable_language(CXX)
++  # sans C++ (tcc)
+   check_c_source_compiles("
+     #include <windows.h>
+     int main(int argc, char **argv) { return 0; }" HAVE_WIN32_CC)
+ 
+   sdl_glob_sources(
+     "${SDL3_SOURCE_DIR}/src/core/windows/*.c"
+-    "${SDL3_SOURCE_DIR}/src/core/windows/*.cpp"
+     "${SDL3_SOURCE_DIR}/src/core/windows/*.h"
+   )
+   sdl_glob_sources("${SDL3_SOURCE_DIR}/src/main/windows/*.c")
+@@ -2328,7 +2327,6 @@
+     set(SDL_VIDEO_DRIVER_WINDOWS 1)
+     sdl_glob_sources(
+       "${SDL3_SOURCE_DIR}/src/video/windows/*.c"
+-      "${SDL3_SOURCE_DIR}/src/video/windows/*.cpp"
+       "${SDL3_SOURCE_DIR}/src/video/windows/*.h"
+     )
+ 
+diff -ru a/src/video/windows/SDL_windowsmodes.c b/src/video/windows/SDL_windowsmodes.c
+--- a/src/video/windows/SDL_windowsmodes.c
++++ b/src/video/windows/SDL_windowsmodes.c
+@@ -25,6 +25,12 @@
+ #include "SDL_windowsvideo.h"
+ #include "../../events/SDL_displayevents_c.h"
+ 
++#ifdef __TINYC__
++/* tcc : MONITORINFOEXW à plat (les en-têtes de tcc le déclarent avec un membre mi) */
++typedef struct { DWORD cbSize; RECT rcMonitor; RECT rcWork; DWORD dwFlags; WCHAR szDevice[CCHDEVICENAME]; } SDL_MONITORINFOEXW;
++#define MONITORINFOEXW SDL_MONITORINFOEXW
++#endif
++
+ #ifdef HAVE_DXGI1_6_H
+ #define COBJMACROS
+ #include <dxgi1_6.h>
+diff -ru a/src/video/windows/SDL_windowsvideo.c b/src/video/windows/SDL_windowsvideo.c
+--- a/src/video/windows/SDL_windowsvideo.c
++++ b/src/video/windows/SDL_windowsvideo.c
+@@ -602,7 +602,7 @@
+     if (SUCCEEDED(hr)) {
+         data->coinitialized = true;
+ 
+-#if !(defined(SDL_PLATFORM_XBOXONE) || defined(SDL_PLATFORM_XBOXSERIES))
++#if !(defined(SDL_PLATFORM_XBOXONE) || defined(SDL_PLATFORM_XBOXSERIES) || defined(__TINYC__))
+         hr = OleInitialize(NULL);
+         if (SUCCEEDED(hr)) {
+             data->oleinitialized = true;
+@@ -701,7 +701,7 @@
+     }
+ }
+ 
+-#if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
++#if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES) && !defined(__TINYC__)
+ #define D3D_DEBUG_INFO
+ #include <d3d9.h>
+ 
+@@ -801,7 +801,14 @@
+         return adapterIndex;
+     }
+ }
+-#endif // !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
++#elif defined(__TINYC__)
++/* tcc : pas d'en-têtes Direct3D, rendu logiciel seulement */
++int SDL_GetDirect3D9AdapterIndex(SDL_DisplayID displayID)
++{
++    SDL_Unsupported();
++    return -1;
++}
++#endif
+ 
+ bool SDL_GetDXGIOutputInfo(SDL_DisplayID displayID, int *adapterIndex, int *outputIndex)
+ {
+diff -ru a/src/video/windows/SDL_windowswindow.c b/src/video/windows/SDL_windowswindow.c
+--- a/src/video/windows/SDL_windowswindow.c
++++ b/src/video/windows/SDL_windowswindow.c
+@@ -1711,6 +1711,7 @@
+ }
+ 
+ #if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
++#ifndef __TINYC__ /* tcc : pas d'OLE (en-têtes absents), glisser-déposer par WM_DROPFILES */
+ 
+ static const char *SDLGetClipboardFormatName(UINT cf, char *text, int len)
+ {
+@@ -2139,9 +2140,11 @@
+     (void *)(SDLDropTarget_Drop)
+ };
+ 
++#endif // __TINYC__
+ void WIN_AcceptDragAndDrop(SDL_Window *window, bool accept)
+ {
+     SDL_WindowData *data = window->internal;
++#ifndef __TINYC__
+     if (data->videodata->oleinitialized) {
+         if (accept && !data->drop_target) {
+             SDLDropTarget *drop_target = (SDLDropTarget *)SDL_calloc(1, sizeof(SDLDropTarget));
+@@ -2166,7 +2169,9 @@
+                          ". In Accept Drag and Drop, window %u, disabled Full OLE IDropTarget",
+                          window->id);
+         }
+-    } else {
++    } else
++#endif
++    {
+         DragAcceptFiles(data->hwnd, accept ? TRUE : FALSE);
+         SDL_LogTrace(SDL_LOG_CATEGORY_INPUT,
+                      ". In Accept Drag and Drop, window %u, %s Fallback WM_DROPFILES",

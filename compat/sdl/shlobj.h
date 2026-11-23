@@ -1,0 +1,20 @@
+/* shlobj.h minimal pour tcc : dossiers connus */
+#ifndef _SHLOBJ_H
+#define _SHLOBJ_H
+#include <objbase.h>
+typedef GUID KNOWNFOLDERID;
+typedef const GUID *REFKNOWNFOLDERID;
+#define SHGFP_TYPE_CURRENT 0
+#define KF_FLAG_CREATE 0x00008000
+#define CSIDL_APPDATA 0x001a
+#define CSIDL_PROFILE 0x0028
+#define CSIDL_DESKTOP 0x0000
+#define CSIDL_MYDOCUMENTS 0x0005
+#define CSIDL_MYMUSIC 0x000d
+#define CSIDL_MYPICTURES 0x0027
+#define CSIDL_TEMPLATES 0x0015
+#define CSIDL_MYVIDEO 0x000e
+#define CSIDL_FLAG_CREATE 0x8000
+WINAPI HRESULT SHGetKnownFolderPath(REFKNOWNFOLDERID, DWORD, HANDLE, PWSTR *);
+WINAPI HRESULT SHGetFolderPathW(HWND, int, HANDLE, DWORD, LPWSTR);
+#endif
