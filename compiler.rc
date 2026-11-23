@@ -1,97 +1,117 @@
 #!/usr/bin/env rc
-# Compile acme (port SDL3 de blakemcbride/Acme) pour Windows x86-64 sur deb,
-# avec tcc seulement : tcc croisé, SDL3 réduite (vidéo, rendu logiciel),
-# FreeType, les bibliothèques Plan 9 du port, puis acme.
-# Résultat : dist/acme.exe, seul fichier à copier sous Windows.
-# Usage : ./compiler.rc   (sources dans sources/, compilation dans construction/)
+# Compile acme (port SDL3 de blakemcbride/Acme) sous Windows x86-64, avec le
+# tcc natif seulement (C:\tcc-dev\tcc.exe) : SDL3 réduite (vidéo, rendu
+# logiciel), FreeType, les bibliothèques Plan 9 du port, puis acme.
+# Ni make, ni CMake : les listes de fichiers sont figées dans le dépôt
+# (sdl/sources.txt, acme/bibliotheques.txt, groupes d'acme plus bas).
+# Résultat : dist/acme.exe, seul fichier à copier.
+# Usage, depuis le dossier du dépôt : rcsh compiler.rc < NUL
 flag e +
-# Outils GNU du système (cmake, make, patch), pas ceux de 9base.
-cd `{dirname $0}
+
+tcc=C:/tcc-dev/tcc.exe
 racine=`{pwd}
+c=$racine/construction
 mkdir -p sources construction dist
 
-# Sources. Signatures GPG vérifiées à la main avant de noter l'empreinte :
+# Sources. Signatures GPG vérifiées avant de noter l'empreinte :
 # SDL3 (Sam Lantinga, 1528635D8053A57F77D1E08630A59377A7763BE6),
 # FreeType (Werner Lemberg, E30674707856409FF1948010BE6C3AAC63AD8E3F).
-# tinycc et Acme : archives GitHub d'un commit, non signées.
+# Acme : archive GitHub d'un commit, non signée.
 fn source { # nom adresse sha256
 	if(! test -f sources/$1){
 		curl -A glads-build/1.0 -sSfL -o sources/$1.part $2
 		mv sources/$1.part sources/$1
 	}
-	if(! ~ `{sha256sum sources/$1 | wak '{ print $1 }'} $3){ echo empreinte fausse : sources/$1 >[1=2]; exit empreinte }
+	e=`{sha256sum sources/$1}
+	if(! ~ $e(1) $3){ echo empreinte fausse : sources/$1 >[1=2]; exit empreinte }
 	status=''
 }
-tccv=fc1fc50f7a5b3151a8932e9c2adb784140306db4
 acmev=4132deacaf9e134c40a534cf671040ad68cbd462
-source tinycc.tar.gz https://github.com/TinyCC/tinycc/archive/$tccv.tar.gz 0efa580b13489e4c10ef0437c354419912dc09081676f63a642e09e77cba5b9e
 source SDL3-3.4.20.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f
 source freetype-2.14.1.tar.xz https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.xz 32427e8c471ac095853212a37aef816c60b42052d4d9e48230bab3bdf2936ccc
 source acme.tar.gz https://github.com/blakemcbride/Acme/archive/$acmev.tar.gz 8847f05d51c35810243820a6aa3ca2457b70c407a8f2a138c57f2f9ccff2c15a
 
-c=$racine/construction
-rm -rf $c/*
+# tar de Windows (bsdtar : gzip et xz), pas celui de 9pm
+wtar=C:/Windows/Sysnative/tar.exe
+rm -rf $c
+mkdir -p $c/def $c/o $c/lib
 cd $c
-tar -xzf $racine/sources/tinycc.tar.gz
-tar -xzf $racine/sources/SDL3-3.4.20.tar.gz
-tar -xJf $racine/sources/freetype-2.14.1.tar.xz
-tar -xzf $racine/sources/acme.tar.gz
+$wtar -xf $racine/sources/SDL3-3.4.20.tar.gz
+$wtar -xf $racine/sources/freetype-2.14.1.tar.xz
+$wtar -xf $racine/sources/acme.tar.gz
 mv Acme-$acmev acme
 
-# 1. tcc croisé (Linux -> Windows x86-64), avec les listes d'imports des DLL
-#    Windows qui lui manquent ou qu'il a dans une version trop ancienne
-cd $c/tinycc-$tccv
-./configure --prefix'='$c/tcc >/dev/null
-make cross-x86_64-win32 >/dev/null
-make install >/dev/null
-cp $racine/def/*.def $c/tcc/lib/tcc/win32/lib/
-tcc=$c/tcc/bin/x86_64-win32-tcc
-lib=$c/acme/lib
+# 1. listes d'imports des DLL Windows absentes de tcc ou trop anciennes chez lui
+#    (tcc est un programme 64 bits : il lit le vrai System32)
+for(d in kernel32 user32 gdi32 advapi32 shell32 ole32 oleaut32 imm32 winmm setupapi version cfgmgr32)
+	$tcc -impdef C:/Windows/System32/$d.dll -o $c/def/$d.def
+lien=(-L$c/lib -L$c/def)
+
+# nom d'objet unique pour un chemin de source : a/b/c.c -> a_b_c.o
+fn objet { echo $c/o/$1^_^`{echo $2 | sed 's,/,_,g; s,\.c$,,'}^.o }
 
 # 2. SDL3 : vidéo et rendu logiciel seulement, sans C++, Direct3D, OLE ni IME
 cd $c/SDL3-3.4.20
-patch -p1 -s < $racine/sdl3-tcc.patch
-cd $c
-{
-	echo 'set(CMAKE_SYSTEM_NAME Windows)'
-	echo 'set(CMAKE_SYSTEM_PROCESSOR AMD64)'
-	echo 'set(CMAKE_C_COMPILER '^$tcc^')'
-	echo 'set(CMAKE_AR '^$tcc^')'
-	echo 'set(CMAKE_C_CREATE_STATIC_LIBRARY "<CMAKE_AR> -ar rcs <TARGET> <LINK_FLAGS> <OBJECTS>")'
-} > tcc-win.cmake
-mkdir sdl
-cd sdl
+git apply $racine/sdl3-tcc.patch
+mkdir -p $c/sdlrev/SDL3
+cp $racine/sdl/SDL_revision.h $c/sdlrev/SDL3/
 s=$racine/compat/sdl
-off=(AUDIO JOYSTICK HAPTIC HIDAPI SENSOR POWER CAMERA GPU DIALOG TRAY VULKAN OPENGL OPENGLES DIRECTX RENDER_D3D RENDER_D3D11 RENDER_D3D12 RENDER_GPU RENDER_VULKAN ASSEMBLY SHARED TEST_LIBRARY)
-cmake ../SDL3-3.4.20 -DCMAKE_TOOLCHAIN_FILE'='$c/tcc-win.cmake '-DCMAKE_C_FLAGS=-I'^$s^' -include '^$s^'/force.h' -DSDL_STATIC'='ON -DCMAKE_BUILD_TYPE'='Release -DSDL_^$off^'=OFF' > cmake.log
-make -j2 > make.log
-$tcc -c -I$s -o sdl-tcc.o $s/sdl-tcc.c
-cp SDL3-static.lib libSDL3.a
+sdlflags=(-O2 -DNDEBUG -DSDL_BUILD_MAJOR_VERSION'='3 -DSDL_BUILD_MINOR_VERSION'='4 -DSDL_BUILD_MICRO_VERSION'='20 -DSDL_STATIC_LIB -DUSING_GENERATED_CONFIG_H -DSTBI_NO_SIMD -I$s -include $s/force.h -I$racine/sdl -I$c/sdlrev -Iinclude -Isrc -Isrc/video/khronos)
+objs=()
+for(f in `{cat $racine/sdl/sources.txt}){
+	o=`{objet sdl $f}
+	$tcc -c $sdlflags -o $o $f >>$c/sdl.log >[2=1]
+	objs=($objs $o)
+}
+$tcc -c -I$s -o $c/o/sdl-tcc.o $s/sdl-tcc.c
+$tcc -ar rcs $c/lib/libSDL3.a $objs
 
-# 3. FreeType (tous les modules de la configuration par défaut, sans bzip2 ni PNG)
+# 3. FreeType (modules de la configuration par défaut, sans bzip2 ni PNG)
 cd $c/freetype-2.14.1
-mkdir o
-for(f in base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftbbox base/ftglyph base/ftbitmap base/ftmm base/ftsynth base/ftstroke base/fttype1 base/ftfstype base/ftgasp base/ftpatent base/ftwinfnt base/ftotval base/ftcid base/ftpfr autofit/autofit truetype/truetype type1/type1 cff/cff cid/type1cid pfr/pfr type42/type42 winfonts/winfnt pcf/pcf bdf/bdf sfnt/sfnt psaux/psaux psnames/psnames pshinter/pshinter smooth/smooth raster/raster sdf/sdf svg/svg gzip/ftgzip lzw/ftlzw)
-	$tcc -c -O2 -DFT2_BUILD_LIBRARY -Iinclude -o o/`{basename $f}^.o src/$f.c
-$tcc -ar rcs $lib/libfreetype.a o/*.o
+objs=()
+for(f in base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftbbox base/ftglyph base/ftbitmap base/ftmm base/ftsynth base/ftstroke base/fttype1 base/ftfstype base/ftgasp base/ftpatent base/ftwinfnt base/ftotval base/ftcid base/ftpfr autofit/autofit truetype/truetype type1/type1 cff/cff cid/type1cid pfr/pfr type42/type42 winfonts/winfnt pcf/pcf bdf/bdf sfnt/sfnt psaux/psaux psnames/psnames pshinter/pshinter smooth/smooth raster/raster sdf/sdf svg/svg gzip/ftgzip lzw/ftlzw){
+	o=`{objet ft $f.c}
+	$tcc -c -O2 -DFT2_BUILD_LIBRARY -Iinclude -o $o src/$f.c >>$c/freetype.log >[2=1]
+	objs=($objs $o)
+}
+$tcc -ar rcs $c/lib/libfreetype.a $objs
 
 # 4. bibliothèques Plan 9 du port, avec pthread, dirent et fontconfig réduits
 a=$racine/compat/acme
 cd $c/acme
-patch -p1 -s < $racine/acme-tcc.patch
+git apply $racine/acme-tcc.patch
 cp $racine/latin1.h src/cmd/devdraw/latin1.h
-for(d in lib9 libbio libregexp libthread libmux lib9pclient libauth libauthsrv libip libndb libsec libmp libcomplete libplumb libdraw libmemdraw libmemlayer libframe)
-	make -C src/$d PLAN9'='$c/acme CC'='$tcc^' -I'^$a AR'='$tcc^' -ar' GCC_WARN_FLAGS'=' PLATFORM_SRC'='none.c > $c/$d.log
-$tcc -c -O2 -o $c/dirent.o $a/dirent.c
-$tcc -c -O2 -I$c/freetype-2.14.1/include -I$a -o $c/fcmini.o $a/fcmini.c
-$tcc -ar rcs $lib/libtcccompat.a $c/dirent.o $c/fcmini.o
-$tcc -c -O2 -Iinclude -I$a -DPLAN9PORT -o $c/p9main.o src/lib9/main.c
+p9flags=(-O2 -I$a -I$c/acme/include -DPLAN9PORT)
+for(d in `{wak '{ print $1 }' $racine/acme/bibliotheques.txt | uniq}){
+	n=`{wak -v 'd='$d '$1 == d { print $2; exit }' $racine/acme/bibliotheques.txt}
+	cd $c/acme/src/$d
+	extra=()
+	if(~ $d lib9) extra=(-Ifmt -include $a/plan9-target.h)
+	objs=()
+	for(f in `{wak -v 'd='$d '$1 == d { print $3 }' $racine/acme/bibliotheques.txt}){
+		o=`{objet $d $f}
+		$tcc -c $p9flags -I. $extra -o $o $f >>$c/plan9.log >[2=1]
+		objs=($objs $o)
+	}
+	$tcc -ar rcs $c/lib/$n $objs
+}
+cd $c/acme
+$tcc -c -O2 -o $c/o/dirent.o $a/dirent.c
+$tcc -c -O2 -I$c/freetype-2.14.1/include -I$a -o $c/o/fcmini.o $a/fcmini.c
+$tcc -ar rcs $c/lib/libtcccompat.a $c/o/dirent.o $c/o/fcmini.o
+$tcc -c $p9flags -o $c/o/p9main.o src/lib9/main.c
 
-# 5. acme (latin1.h fourni : la règle du Makefile le régénérerait avec un outil Linux)
+# 5. acme : sources de acme-sdl3, ../acme, ../devdraw et ../fontsrv
+#    (groupes LOCAL_SRC, ACME_SRC, DEVDRAW_SRC et FONTSRV_OBJ de son Makefile)
 cd $c/acme/src/cmd/acme-sdl3
-$tcc -I$a -O2 -c -I../../../include -I../devdraw -o latin1.o ../devdraw/latin1.c
-objets=`{make -s PLAN9'='$c/acme --eval 'objets: ; @echo $(OBJS)' objets}
-make PLAN9'='$c/acme -o latin1.o -o ../devdraw/latin1.h $objets CC'='$tcc^' -I'^$a GCC_WARN_FLAGS'=' FREETYPE_CFLAGS'=-I'^$c^'/freetype-2.14.1/include' SDL3_CFLAGS'=-I'^$c^'/SDL3-3.4.20/include' FONTCONFIG_CFLAGS'=' > $c/acme.log
-$tcc -mwindows -o $racine/dist/acme.exe $objets $c/p9main.o $c/sdl/sdl-tcc.o -L$lib -L$c/sdl -lsec -lauth -lauthsrv -lmemdraw -lndb -lplumb -lmemlayer -lframe -ldraw -l9pclient -lip -lmp -lmux -lthread -lregexp9 -lcomplete -lbio -l9 -lthread -l9 -lsec -l9 -ltcccompat -lSDL3 -lfreetype -lkernel32 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -ladvapi32 -lsetupapi -lshell32 -lcfgmgr32 -lws2_32
-sha256sum $racine/dist/acme.exe
-echo prêt : $racine/dist/acme.exe
+acmeflags=($p9flags -I../acme -I../fontsrv -I../devdraw -I../../libdraw -I$c/freetype-2.14.1/include -I$c/SDL3-3.4.20/include)
+objs=()
+for(f in drawbridge.c srv-direct.c look.c fsys.c fontpipe.c openfont.c getsubfont.c plumb-glue.c plumb-rules.c plumb-match.c win.c pipecmd.c ../acme/^(acme.c addr.c buff.c cols.c dat.c disk.c ecmd.c edit.c elog.c exec.c file.c logf.c regx.c rows.c scrl.c text.c time.c util.c wind.c xfid.c) ../devdraw/^(devdraw.c sdl3-draw.c sdl3-screen.c latin1.c mouseswap.c winsize.c) ../fontsrv/^(x11.c pjw.c)){
+	o=`{objet acme `{echo $f | sed 's,^\.\./,,'}}
+	$tcc -c $acmeflags -o $o $f >>$c/acme.log >[2=1]
+	objs=($objs $o)
+}
+$tcc -mwindows -o $racine/dist/acme.exe $objs $c/o/p9main.o $c/o/sdl-tcc.o $lien -lsec -lauth -lauthsrv -lmemdraw -lndb -lplumb -lmemlayer -lframe -ldraw -l9pclient -lip -lmp -lmux -lthread -lregexp9 -lcomplete -lbio -l9 -lthread -l9 -lsec -l9 -ltcccompat -lSDL3 -lfreetype -lkernel32 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -ladvapi32 -lsetupapi -lshell32 -lcfgmgr32 -lws2_32
+cd $racine
+sha256sum dist/acme.exe
+echo prêt : dist/acme.exe
