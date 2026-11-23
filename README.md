@@ -20,3 +20,10 @@ Résultat : `dist/acme.exe`, seul fichier à copier (environ 10 minutes dans la 
 - `compat/sdl/` : en-têtes Windows absents de tcc, réduits à ce que SDL3 utilise ; IME désactivé (`force.h`) ; `sdl-tcc.c` (GameInput indisponible, GUID de la barre des tâches).
 - `compat/acme/` : `pthread.h` sur les verrous SRW et le TLS de Windows, `dirent.c`, `consoleapi.h` (ConPTY), `wincrypt.h`, `utime.h`, `plan9-target.h` (racine Plan 9 que réclame lib9), et `fcmini.c` : fontconfig réduit, qui inventorie `C:\Windows\Fonts` avec FreeType (« mono » donne Consolas).
 - `latin1.h` : table de composition des caractères, produite par `mklatinkbd -r lib/keyboard` (outil d'Acme).
+
+## Licences
+
+- Nos fichiers (`compiler.rc`, `compat/` sauf `compat/sdl/shobjidl.h`, `acme/bibliotheques.txt`, `sdl/sources.txt`) : domaine public, par la dédicace CC0 1.0 (`LICENSE`). En droit français, on ne peut pas renoncer à tous ses droits d'auteur : CC0 prévoit alors une licence libre sans condition.
+- Repris de SDL3, sous licence zlib (avis en tête de chaque fichier) : `compat/sdl/shobjidl.h` (déclaration d'`ITaskbarList3`), `sdl/SDL_build_config.h`, `sdl/SDL_revision.h`, et `sdl3-tcc.patch`, qui modifie SDL3.
+- Repris d'Acme et de plan9port, sous leur licence (de type MIT, `LICENSE` d'Acme) : `latin1.h`, produit à partir de `lib/keyboard`, et `acme-tcc.patch`, qui modifie Acme.
+- Le binaire `acme.exe` assemble Acme et plan9port (licence de type MIT), SDL3 (zlib), FreeType (licence FreeType : « Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved. ») et le runtime de tcc (LGPL). Une release qui le contient doit joindre ces licences.
